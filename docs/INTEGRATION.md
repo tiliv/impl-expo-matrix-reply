@@ -118,3 +118,29 @@ These are genuine product calls the template surfaces but does not make:
    plus a new deadline input.
 3. **Whether the quote respects the *parent's* room settings.** Cross-room
    replies are out of scope here; everything resolves against one room's config.
+
+---
+
+## The wire, added later
+
+`core/envelope.ts` + `core/packing.ts` now carry the reply model to and from a real
+room event. What that turned up, in order of how much it would have cost to find
+out late:
+
+1. **A reply must not carry a Matrix fallback quote.** It survives the parent's
+   revocation. This repo's whole thesis — render the quote from the resolved
+   parent — is incompatible with the convention Matrix clients expect, and the
+   incompatibility is the correct choice rather than an oversight.
+2. **`txnId` has to be persisted with the message.** It is the only handle for
+   unsending. Scoping it to the request is a silent, permanent loss of the ability
+   to revoke.
+3. **`revoked: true` arrives with readable content.** Check it first.
+4. **Media beyond ten attachments cannot be revoked with its message.**
+5. **The AES key travels inside the envelope.** So a lost room key loses the media
+   too, not just the text — and a media reference is worthless outside the envelope
+   that carried it. `unpackEnvelope` deliberately keeps key material out of the
+   render model; `readFiles` fetches it only where it is needed.
+
+Still open: nothing here has been round-tripped against a live deployment. The
+shapes match the spec and the SDK's send path; whether a real `sync` hands back
+exactly this is untested.

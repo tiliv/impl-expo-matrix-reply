@@ -119,3 +119,41 @@ app.
   history in quotes, that is a new `ReplyTarget` variant, not a tweak.
 - No pagination: the timeline is a plain list. Backfill is simulated with a
   timer so the `pending` state is visible for ~2s.
+
+---
+
+## The wire boundary
+
+`src/core/envelope.ts` (byte-identical across the `impl-expo-*` repos) and
+`src/core/packing.ts` are what connect this experiment to the shape the Noodles API
+actually moves. Derived from `noodles-model/openapi` and `noodles-sdk`, not invented.
+
+**Two envelopes, and only one of them is specified.** The server stores room
+content as `additionalProperties: {}` — the spec calls it *"opaque to server"* — so
+the inner plaintext event is entirely a client concern. The only example anywhere
+in the ecosystem is `olm-demo/App.tsx`: `{ msgtype: 'm.text', body }`. Anything
+richer than a text line has no precedent, which makes the choices in `packing.ts`
+decisions rather than transcriptions.
+
+**Three facts that bite:**
+
+- **`txnId` is the unsend handle, not a retry token.** The server derives `eventId`
+  from `(txnId, senderUserId)`, and `POST /rooms/{id}/messages/revoke` takes
+  `txnId` — not `eventId`. A client that generates one, sends, and forgets it can
+  never unsend that message. `packReply` returns it alongside the content so it
+  cannot be dropped by accident.
+- **Revocation is media-aware and capped at ten.**
+  `RevokeRoomMessageRequest.mediaIds` is `maxItems: 10`. Past ten, unsending takes
+  the text and leaves the files downloadable. `revocationPlan()` reports what is
+  not covered rather than truncating silently.
+- **`revoked` must be checked before content is read.** The server marks revoked
+  events rather than erasing them, so readable text arrives with `revoked: true`.
+  Decoding first and checking after renders an unsent message — the single most
+  important ordering in `decodeWire`.
+
+**No Matrix reply fallback, deliberately.** Matrix replies embed the parent's text
+in the child's own `body` prefixed with `> `, so unaware clients show something.
+We cannot: that copy survives the parent's revocation and its retention window,
+which defeats the entire point of rendering the quote from the resolved parent.
+Cost: a client that does not understand `app.envelope.relates_to` shows our reply
+as a bare message. Acceptable — there is one client.
